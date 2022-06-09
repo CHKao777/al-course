@@ -1,4 +1,5 @@
 import numpy as np
+import time
 row,col = 10,5 #board size
 
 class AI():
@@ -13,7 +14,8 @@ class AI():
         self.oppopoints = 0
         self.board = np.loadtxt("board2.txt", dtype= int)
         
-        # #make board
+        #make board
+        # self.board = np.zeros([row,col], dtype=int)
         # tmp = (np.arange(row)/2)+1
         # while(1):
         #     for i in range(col):
@@ -63,16 +65,23 @@ class AI():
         #######################################################
         ##### This is the main part you need to implement #####
         #######################################################        
-        p = 0
-        while not(p):
-            x= np.random.randint(row)
-            y= np.random.randint(col)
-            p = self.board[x][y]
+        # p = 0
+        # while not(p):
+        #     x= np.random.randint(row)
+        #     y= np.random.randint(col)
+        #     p = self.board[x][y]
+        # return [x,y]
+
+        #my implementation
+        root_state = CantrisGameState(self.board, self.mypoints - self.oppopoints, next_to_move=self.step % 2 + 1)
+        root_node = TwoPlayersGameMonteCarloTreeSearchNode(root_state)
+        x, y = MonteCarloTreeSearch(root_node).best_action(total_simulation_seconds=25)
+
         return [x,y]
         # return format : [x,y]
         # Use AI to make decision !
         # random is only for testing !
-    
+
     def rand_select(self):
         p = 0
         while not(p):
@@ -145,6 +154,202 @@ class AI():
         print('The board is :')
         print(self.board)
         print('――――――――――――――――――')
+
+class CantrisGameState():
+
+    def __init__(self, state, score, action=None, next_to_move=1):
+        self.board = state
+        self.score = score
+        self.action = action #take which action to get in this state
+        self.next_to_move = next_to_move
+
+    def game_result(self):
+        # check if game is over
+        if not np.any(self.board[-1] == 0):
+            return None
+        if self.score > 0:
+            return 1
+        if self.score < 0:
+            return 2
+        return 0
+
+    def is_game_over(self):
+        return self.game_result() is not None
+
+    def is_move_legal(self, move):
+        x, y = move
+        assert (0 <= x and x <= row - 1 and 0 <= y and y <= col - 1)
+        assert (self.board[x][y] > 0)
+
+    def move(self, move):
+        self.is_move_legal(move)
+
+        x, y = move
+        pts = self.board[x][y]
+        new_board = np.copy(self.board)
+        new_board[1:x+1,y] = new_board[0:x,y]
+        new_board[0][y] = 0
+
+        if not np.any(new_board[-1] == 0):
+            pts += self.clean(new_board)
+        
+        score = self.score
+        if self.next_to_move == 1 or self.next_to_move == 2:
+            score += pts
+        else:
+            score -= pts
+
+        return CantrisGameState(new_board, score, move, self.next_to_move % 4 + 1)
+
+    def clean(self, board): #clean the tile , return points
+        unstable = 1
+        points = 0
+        while (unstable):
+            unstable = 0
+            for i in range(row):
+                for j in range(col-2):
+                    if abs(board[i][j]) == abs(board[i][j+1]) == abs(board[i][j+2]) != 0:
+                        board[i][j] = board[i][j+1] = board[i][j+2] = -abs(board[i][j])
+                        unstable = 1
+            points -= board[board<0].sum()
+            board[board<0] = 0
+            self.drop(board)       
+        return points
+
+    def drop(self, board): # drop the tile 
+        for c in range(col):
+            if board[:,c].sum()!=0:
+                k = -len(board[:,c][board[:,c]>0])
+                board[k:,c] = board[:,c][board[:,c]>0]
+                board[:k,c] = 0
+
+    def get_legal_actions(self):
+        indices = np.where(self.board != 0)
+        return list(zip(indices[0], indices[1]))
+
+
+class TwoPlayersGameMonteCarloTreeSearchNode():
+
+    def __init__(self, state, parent=None):
+        self.state = state
+        self.parent = parent
+        self.children = []
+        self.n = 0.
+        self.win = 0. #win count
+        self.lose = 0. #lose count
+        self._untried_actions = None
+
+    def untried_actions(self):
+        if self._untried_actions is None:
+            self._untried_actions = self.state.get_legal_actions()
+        return self._untried_actions
+
+    def expand(self):
+        action = self.untried_actions().pop()
+        next_state = self.state.move(action)
+        child_node = TwoPlayersGameMonteCarloTreeSearchNode(
+            next_state, parent=self
+        )
+        self.children.append(child_node)
+        return child_node
+
+    def is_terminal_node(self):
+        return self.state.is_game_over()
+
+    def rollout(self):
+        current_rollout_state = self.state
+        while not current_rollout_state.is_game_over():
+            possible_moves = current_rollout_state.get_legal_actions()
+            action = self.rollout_policy(possible_moves)
+            current_rollout_state = current_rollout_state.move(action)
+        return current_rollout_state.game_result()
+
+    def backpropagate(self, result):
+        self.n += 1.
+
+        if self.parent is not None:
+            player_no = (self.parent.state.next_to_move + 1) // 2
+            if player_no == result:
+                self.win += 1.
+            elif result != 0:
+                self.lose += 1.
+
+        if self.parent:
+            self.parent.backpropagate(result)
+    
+    def is_fully_expanded(self):
+        return len(self.untried_actions()) == 0
+
+    def best_child(self, c_param=1.):
+        choices_weights = [
+            ((c.win - c.lose) / c.n) + c_param * np.sqrt((2 * np.log(self.n) / c.n))
+            # ((c.win) / c.n) + c_param * np.sqrt((2 * np.log(self.n) / c.n))
+            for c in self.children
+        ]
+        return self.children[np.argmax(choices_weights)]
+
+    def rollout_policy(self, possible_moves):        
+        return possible_moves[np.random.randint(len(possible_moves))]
+
+
+class MonteCarloTreeSearch(object):
+
+    def __init__(self, node):
+        """
+        MonteCarloTreeSearchNode
+        Parameters
+        ----------
+        node : mctspy.tree.nodes.MonteCarloTreeSearchNode
+        """
+        self.root = node
+
+    def best_action(self, simulations_number=None, total_simulation_seconds=None):
+        """
+
+        Parameters
+        ----------
+        simulations_number : int
+            number of simulations performed to get the best action
+
+        total_simulation_seconds : float
+            Amount of time the algorithm has to run. Specified in seconds
+
+        Returns
+        -------
+
+        """
+
+        if simulations_number is None :
+            assert(total_simulation_seconds is not None)
+            end_time = time.time() + total_simulation_seconds
+            while time.time() < end_time:
+                v = self._tree_policy()
+                reward = v.rollout()
+                v.backpropagate(reward)
+        else :
+            for _ in range(0, simulations_number):            
+                v = self._tree_policy()
+                reward = v.rollout()
+                v.backpropagate(reward)
+            
+        return self.root.best_child(c_param=0.).state.action
+
+    def _tree_policy(self):
+        """
+        selects node to run rollout/playout for
+
+        Returns
+        -------
+
+        """
+        current_node = self.root
+        while not current_node.is_terminal_node():
+            if not current_node.is_fully_expanded():
+                return current_node.expand()
+            else:
+                current_node = current_node.best_child(c_param=1.)
+        return current_node
+
 
 if __name__ == '__main__':
  
