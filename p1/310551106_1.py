@@ -1,9 +1,5 @@
 import numpy as np
-from tqdm import tqdm
-import sys
-import psutil 
-
-
+import time
 row,col = 6,3 #board size
 
 class AI():
@@ -18,7 +14,7 @@ class AI():
         self.oppopoints = 0
         self.board = np.loadtxt("board.txt", dtype= int)
         
-        # #make board
+        #make board
         # tmp = (np.arange(row)/2)+1
         # while(1):
         #     for i in range(col):
@@ -74,9 +70,11 @@ class AI():
         #     y= np.random.randint(col)
         #     p = self.board[x][y]
         # return [x,y]
+
+        #my implementation
         root_state = CantrisGameState(self.board, self.mypoints - self.oppopoints)
         root_node = TwoPlayersGameMonteCarloTreeSearchNode(root_state)
-        x, y = MonteCarloTreeSearch(root_node).best_action(MCST_simulation_count)
+        x, y = MonteCarloTreeSearch(root_node).best_action(total_simulation_seconds=25)
         return [x, y]
 
         # return format : [x,y]
@@ -102,65 +100,51 @@ class AI():
         pts += self.clean()
         return pts
         
-    def start(self, first_or_second, verbose):
-        if verbose == 1:
-            print("Game start!")      
-            print('――――――――――――――――――')
-            self.show_board()
-        # self.turn = int(input("Set the player's order(0:first, 1:second): "))
-        if first_or_second == 'first':
-            self.turn = 0
-        elif first_or_second == 'second':
-            self.turn = 1
+    def start(self):
+        print("Game start!")      
+        print('――――――――――――――――――')
+        self.show_board()
+        self.turn = int(input("Set the player's order(0:first, 1:second): "))
+
 
         #start playing    
         while not self.gameover:
-            if verbose == 1:
-                print('Turn:', self.step)
+            print('Turn:', self.step)
             if (self.step%2) == self.turn:
-                if verbose == 1:
-                    print('It\'s your turn')
+                print('It\'s your turn')
                 x,y = self.make_decision()
-                if verbose == 1:
-                    print(f"Your move is {x},{y}.")
+                print(f"Your move is {x},{y}.")
                 # [x,y] = [int(x) for x in input("Enter the move : ").split()]
                 assert (0<=x and x<=row-1 and 0<=y and y<=col-1)
                 assert (self.board[x][y]>0)
                 pts = self.make_move(x,y)
                 self.mypoints += pts
-                if verbose == 1:
-                    print(f'You get {pts} points')  
-                    self.show_board()
+                print(f'You get {pts} points')  
+                self.show_board()
 
             else:
-                if verbose == 1:
-                    print('It\'s opponent\'s turn')
-                x,y = self.rand_select() # can use this while testing ,close it when you submit
-                # [x,y] = [int(x) for x in input("Enter the move : ").split()] #open it when you submit
+                print('It\'s opponent\'s turn')
+                # x,y = self.rand_select() # can use this while testing ,close it when you submit
+                [x,y] = [int(x) for x in input("Enter the move : ").split()] #open it when you submit
                 assert (0<=x and x<=row-1 and 0<=y and y<=col-1)
                 assert (self.board[x][y]>0)
-                if verbose == 1:
-                    print(f"Your opponent move is {x},{y}.")
+                print(f"Your opponent move is {x},{y}.")
                 pts = self.make_move(x,y)
                 self.oppopoints += pts
-                if verbose == 1:
-                    print(f'Your opponent\'s get {pts} points')
-                    self.show_board()
+                print(f'Your opponent\'s get {pts} points')
+                self.show_board()
 
             self.step += 1
 
         #gameover
         if self.mypoints > self.oppopoints:
-            if verbose == 1:
-                print('You win!')
+            print('You win!')
             return 1
         elif self.mypoints < self.oppopoints:
-            if verbose == 1:
-                print('You lose!')
+            print('You lose!')
             return -1
         else:
-            if verbose == 1:
-                print('Tie!')
+            print('Tie!')
             return 0
 
     def show_board(self):
@@ -172,24 +156,17 @@ class AI():
 
 class CantrisGameState():
 
-    # x = 1
-    # o = -1
-
     def __init__(self, state, score, action=None, next_to_move=1):
-        # if len(state.shape) != 2 or state.shape[0] != state.shape[1]:
-        #     raise ValueError("Only 2D square boards allowed")
         self.board = state
         self.action = action #take which action to get in this state
-        # self.board_size = state.shape[0]
         self.next_to_move = next_to_move
         self.score = score
 
-    # @property
+    @property
     def game_result(self):
         # check if game is over
         if not np.any(self.board[-1] == 0):
             return None
-
         if self.score > 0:
             return 1
         if self.score < 0:
@@ -197,7 +174,7 @@ class CantrisGameState():
         return 0
 
     def is_game_over(self):
-        return self.game_result() is not None
+        return self.game_result is not None
 
     def is_move_legal(self, move):
         x, y = move
@@ -254,28 +231,22 @@ class CantrisGameState():
 class TwoPlayersGameMonteCarloTreeSearchNode():
 
     def __init__(self, state, parent=None):
-        # super().__init__(state, parent)
         self.state = state
         self.parent = parent
         self.children = []
-        self.n = 0.
-        # self._results = defaultdict(int)
-        self.win = 0. #win count
-        self.lose = 0. #lose count
+        self.n = 0. # num of visits
+        self.win = 0. # num of wins
+        self.lose = 0. # num of loses
         self._untried_actions = None
 
-    # @property
+    @property
     def untried_actions(self):
         if self._untried_actions is None:
             self._untried_actions = self.state.get_legal_actions()
         return self._untried_actions
 
-    # @property
-
-    # @property
-
     def expand(self):
-        action = self.untried_actions().pop()
+        action = self.untried_actions.pop()
         next_state = self.state.move(action)
         child_node = TwoPlayersGameMonteCarloTreeSearchNode(
             next_state, parent=self
@@ -292,7 +263,7 @@ class TwoPlayersGameMonteCarloTreeSearchNode():
             possible_moves = current_rollout_state.get_legal_actions()
             action = self.rollout_policy(possible_moves)
             current_rollout_state = current_rollout_state.move(action)
-        return current_rollout_state.game_result()
+        return current_rollout_state.game_result
 
     def backpropagate(self, result):
         self.n += 1.
@@ -307,12 +278,13 @@ class TwoPlayersGameMonteCarloTreeSearchNode():
             self.parent.backpropagate(result)
     
     def is_fully_expanded(self):
-        return len(self.untried_actions()) == 0
+        return len(self.untried_actions) == 0
 
     def best_child(self, c_param=1.):
         # print(len(self.children))
         choices_weights = [
             ((c.win - c.lose) / c.n) + c_param * np.sqrt((2 * np.log(self.n) / c.n))
+            # ((c.win) / c.n) + c_param * np.sqrt((2 * np.log(self.n) / c.n))
             for c in self.children
         ]
         return self.children[np.argmax(choices_weights)]
@@ -362,7 +334,7 @@ class MonteCarloTreeSearch(object):
                 v.backpropagate(reward)
         # to select best child go for exploitation only
             
-        return self.root.best_child(c_param=1.).state.action
+        return self.root.best_child(c_param=0.).state.action
 
     def _tree_policy(self):
         """
@@ -383,31 +355,4 @@ class MonteCarloTreeSearch(object):
 if __name__ == '__main__':
  
     game = AI()
-
-    total_gameplay_count = 10000
-    MCST_simulation_count = 1000
-
-    gameplay_count = total_gameplay_count // psutil.cpu_count(logical = False)
-    pbar = tqdm(range(gameplay_count))
-    record = [0, 0, 0] #0:lose, 1:tie, 2:win
-
-    for _ in range(gameplay_count):
-        if np.random.randint(2) == 0:
-            first_or_second = 'first'
-        else:
-            first_or_second = 'second'
-        result = game.start(first_or_second, verbose=0)
-        record[result + 1] += 1
-        game.__init__()
-        pbar.update()
-    
-    f = open(sys.argv[1], 'w')
-    f.write('win:{:d}\n'.format(record[2]))
-    f.write('tie:{:d}\n'.format(record[1]))
-    f.write('lose:{:d}'.format(record[0]))
-    f.close()
-
-
-    # print('win rate:{:.4f}'.format(record[2] / simulation))
-    # print('tie rate:{:.4f}'.format(record[1] / simulation))
-    # print('lose rate:{:.4f}'.format(record[0] / simulation))
+    game.start()
