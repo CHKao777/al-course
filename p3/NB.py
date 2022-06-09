@@ -74,5 +74,5 @@ for i in range(1, len(df_test)):
 
     result.append(max(predict, key=predict.get))
 
-df_test[13] = result
+df_test[len(type)] = result
 df_test.to_csv(sys.argv[3], header=False, index=False)
