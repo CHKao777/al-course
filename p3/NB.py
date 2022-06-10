@@ -2,77 +2,101 @@
 
 import sys
 import pandas as pd
-import numpy as np
 from statistics import NormalDist
 
 #read raw training data
-df = pd.read_csv(sys.argv[1], header=None)
-type = df.iloc[0].to_numpy()[:-1]
+df = pd.read_csv(sys.argv[1], header=None, dtype=str)
+var_type = df.iloc[0].to_numpy()[:-1]
+var_type = [int(x) for x in var_type]
 df = df.drop([0, 0])
-class_list = df[len(type)].unique()
 
-unique_list = []
-for i in range(len(type)):
-    if type[i] == 0:
-        unique_list.append(df[i].unique())
+# filling missing datas
+for i in range(len(var_type)):
+    missing_count = len(df[i][df[i] == ' ?'])
+    if missing_count != 0:
+        #assign an extra category -1 to missing categorical value 
+        if var_type[i] == 0:
+            df[i] = df[i].replace(' ?', '-1')
+        #assign mean to missing numerical value
+        elif var_type[i] == 1:
+            mean = df[i][df[i] != ' ?'].astype(float).mean()
+            df[i] = df[i].replace(' ?', str(mean))
+        else:
+            raise RuntimeError('var_type is wrong')
+
+class_list = df[len(var_type)].unique()
+
+var_class_list = []
+for i in range(len(var_type)):
+    if var_type[i] == 0:
+        var_class_list.append(df[i].unique())
+    elif var_type[i] == 1:
+        var_class_list.append(None)
     else:
-        unique_list.append(None)
+        raise RuntimeError('var_type is wrong')
 
-total_dict = {}
-c_probility = {}
+total_conditional_probability_dict = {}
+c_probability = {}
 for i in class_list:
-    total_dict[i] = []
-    temp_df = df[df[len(type)] == str(i)]
-    c_probility[i] = len(temp_df) / len(df)
-    for j in range(len(type)):
+    total_conditional_probability_dict[i] = []
+    temp_df = df[df[len(var_type)] == i]
+    c_probability[i] = len(temp_df) / len(df)
+    for j in range(len(var_type)):
         #categorical features
-        if type[j] == 0:
-            assert(unique_list[j] is not None)
+        if var_type[j] == 0:
+            assert(var_class_list[j] is not None)
             _dict = {}
-            if_zero_value = False
-            for k in unique_list[j]:
-                _dict[k] = len(temp_df[temp_df[j] == k])
-                if _dict[k] == 0:
-                    if_zero_value = True
-            #avoid zero possibility
-            if if_zero_value:
-                for k in unique_list[j]:
-                    _dict[k] += 1
-            #calculate conditional possibility
-            sum = 0
-            for k in unique_list[j]:
-                sum += _dict[k]
-            for k in unique_list[j]:
-                _dict[k] /= sum
-            total_dict[i].append(_dict)
+            for k in var_class_list[j]:
+                n = len(temp_df[temp_df[j] == k])
+                N = len(temp_df)
+                #avoid zero probability
+                _dict[k] = (n + 1) / (N + len(var_class_list[j]))
+            total_conditional_probability_dict[i].append(_dict)
         #numerical features
         else:
-            total_dict[i].append({
-                'mean': temp_df[j].mean(), 
-                'std': temp_df[j].std()
+            assert(var_class_list[j] is None)
+            total_conditional_probability_dict[i].append({
+                'mean': temp_df[j].astype(float).mean(), 
+                'std': temp_df[j].astype(float).std()
             })
 
 #testing
-df_test = pd.read_csv(sys.argv[2], header=None)
-df_test = df_test.drop([len(type)], axis=1)
-result = ['class']
+df_test = pd.read_csv(sys.argv[2], header=None, dtype=str)
+df_test = df_test.drop([len(var_type)], axis=1)
+df_return = df_test.copy()
 
+# filling missing datas
+for i in range(len(var_type)):
+    missing_count = len(df_test[i][df_test[i] == ' ?'])
+    if missing_count != 0:
+        #assign an extra category -1 to missing categorical value 
+        if var_type[i] == 0:
+            df_test[i] = df_test[i].replace(' ?', '-1')
+        #assign mean to missing numerical value
+        elif var_type[i] == 1:
+            mean = df[i][df[i] != ' ?'].astype(float).mean()
+            df_test[i] = df_test[i].replace(' ?', str(mean))
+        else:
+            raise RuntimeError('var_type is wrong')
+
+result = ['class']
 
 for i in range(1, len(df_test)):
     x = df_test.iloc[i].to_numpy()
     predict = {}
     for j in class_list:
-        possibility = c_probility[j]
+        probability = c_probability[j]
         for val, index in zip(x, range(len(x))):
             #categorical features
-            if type[index] == 0:
-                possibility *= total_dict[j][index][val]
+            if var_type[index] == 0:
+                probability *= total_conditional_probability_dict[j][index][val]
+            #numerical features
             else:
-                possibility *= NormalDist(mu=total_dict[j][index]['mean'], \
-                    sigma=total_dict[j][index]['std']).pdf(val)
-        predict[j] = possibility
-
+                probability *= NormalDist(mu=total_conditional_probability_dict[j][index]['mean'], \
+                    sigma=total_conditional_probability_dict[j][index]['std']).pdf(float(val))
+        predict[j] = probability
     result.append(max(predict, key=predict.get))
 
-df_test[len(type)] = result
-df_test.to_csv(sys.argv[3], header=False, index=False)
+#save result to csv
+df_return[len(var_type)] = result
+df_return.to_csv(sys.argv[3], header=False, index=False)
