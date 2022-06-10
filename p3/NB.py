@@ -1,4 +1,6 @@
 #implement NB(Naive Bayes) classifier
+#How to run
+#python NB.py path/to/train_01.csv path/to/test_01.csv path/to/id_01.csv
 
 import sys
 import pandas as pd
